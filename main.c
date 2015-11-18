@@ -41,25 +41,15 @@ static SIC_OPTAB OPTAB[] = {
   { "MULF", 0x60, 3 },      { "NORM", 0xC8, 1 },    { "STF", 0x80, 3 },
   { "SUBF", 0x5C, 3 }
 };
-#define NUM_OPCODES         (sizeof(OPTAB) / sizeof(SIC_OPTAB))
-
-/*static SIC_OPTAB OPTAB[]=
-{
-    {   "ADD",  3,  0x18}, {   "AND",  3,  0x40}, {  "COMP",  3,  0x28}, {   "DIV",  3,  0x24}, {     "J",  3,  0x3C},
-    {   "JEQ",  3,  0x30}, {   "JGT",  3,  0x34}, {   "JLT",  3,  0x38}, {  "JSUB",  3,  0x48}, {   "LDA",  3,  0x00},
-    {  "LDCH",  3,  0x50}, {   "LDL",  3,  0x08}, {   "LDX",  3,  0x04}, {   "MUL",  3,  0x20}, {    "OR",  3,  0x44},
-    {    "RD",  3,  0xD8}, {  "RSUB",  3,  0x4C}, {   "STA",  3,  0x0C}, {  "STCH",  3,  0x54}, {   "STL",  3,  0x14},
-    {  "STSW",  3,  0xE8}, {   "STX",  3,  0x10}, {   "SUB",  3,  0x1C}, {    "TD",  3,  0xE0}, {   "TIX",  3,  0x2C},
-    {    "WD",  3,  0xDC},
-};*/
+#define NUM_OPCODES         (sizeof(OPTAB) / sizeof(SIC_OPTAB))	//
 
 //initialize register table
 //source : http://dmitrybrant.com/2003/11/02/assembler-and-linker-for-sicxe
-struct SIC_Reg{ char name[7]; unsigned char code; unsigned int value; };
-const struct SIC_Reg SIC_Regs [] = {
+static SIC_OPTAB REGTAB  [] = {
   { "A", 0x0, 0 },   { "X", 0x1, 0 },   { "L", 0x2, 0 },   { "PC", 0x8, 0 },
-  { "SW", 0x9, 0 },   { "B", 0x3, 0 },   { "S", 0x4, 0 },   { "T", 0x5, 0 },   { "F", 0x6, 0 }};
-#define NUM_REGS         (sizeof(SIC_Regs) / sizeof(SIC_Reg))
+  { "SW", 0x9, 0 },   { "B", 0x3, 0 },   { "S", 0x4, 0 },   { "T", 0x5, 0 },   { "F", 0x6, 0 },
+};
+#define NUM_REGS         (sizeof(REGTAB) / sizeof(SIC_OPTAB))
 
 //LITTAB Definition
 hashtable_t* LITTAB;
@@ -86,6 +76,10 @@ int PC = 0;
 int letThisLinePass = 0;
 int isDone = 0;
 int statusBit = 0;
+int whereIsOnOPTAB = 0;
+int whereIsOnASMTAB = 0;
+int whichPass = 1;
+int previousLOCCTR = 0;
 #define isExtended		1 << 12
 #define isPCRelative	1 << 13
 #define isBaseRelative	1 << 14
@@ -93,24 +87,28 @@ int statusBit = 0;
 #define isImmediate		1 << 16
 #define isIndirect		1 << 17
 
-
 //Inforamtion
 int startAddress = 0;
 int endAddress = 0;
 
-//INPUT FILE POINTER AND STREAM
+//INPUT FILE POINTER AND OUTPUT STREAM
 FILE *fp;
 char stream[BUFSIZE];
 char outputHeaderBuffer[BUFSIZE];
-char outputBuffer[BUFSIZE];
+char outputBuffer[BUFSIZE+1];
+char* outputBufferPointer = NULL;
+int ptrOutputBuffer = 0;
 
 int FindTAB(SIC_OPTAB* table,char* opcode_mnemonic);
 char StartsWith(char* string);
+void PrintOpCode(unsigned int operandToNumber, unsigned int format);
+void PrintBuffer(unsigned int flush);
 
 int TokenParser(char* symboldef, char* opcode_mnemonic, char* operand);
 int Decoder(char* symboldef, char* opcode_mnemonic, char* operand, unsigned int* opcode);
 int Translator(char* symboldef, char* opcode_mnemonic, char* operand, unsigned int* opcode);
-int Printer(char* symboldef, char* opcode_mnemonic, char *operand, unsigned int* opcode);
+
+void SinglePass(char* filename,char* symboldef, char* opcode_mnemonic, char* operand, unsigned int* opcode);
 
 int main(){
 	char* filename = (char *)malloc(20*sizeof(char));
@@ -118,53 +116,18 @@ int main(){
 	char* opcode_mnemonic = (char *)malloc(4*sizeof(char));
 	char* operand = (char *)malloc(10*sizeof(char));
 	unsigned int* opcode = (unsigned int *)malloc(sizeof(int));
-	
+	outputBufferPointer = &outputBuffer;
+
 	SYMTAB = ht_create(100);
 	LITTAB = ht_create(100);
 	printf("_______________SIC/XE Assembler_______________\n");
 	printf("Assemble을 원하는 File의 이름을 입력해주세요.\n Filename >");
 	scanf("%s",filename);
 
-	fp=fopen(filename,"r");
-
-	if(fp == NULL){
-		printf("해당 파일을 읽을 수 없습니다.\n");
-		return -1;
-	}
-
-	while(!feof(fp) && !isDone){
-		TokenParser(symboldef,opcode_mnemonic,operand);
-		if(letThisLinePass == 0){
-			Decoder(symboldef,opcode_mnemonic,operand,opcode);
-			Translator(symboldef,opcode_mnemonic,operand,opcode);
-			Printer(symboldef,opcode_mnemonic,operand,opcode);
-		}
-		if(feof(fp)){
-			//return 0;
-		}
-		//letThisLinePass=0;
-		statusBit = 0;
-	}
-
-	fclose(fp);
-	fp=fopen(filename,"r");
-	letThisLinePass=0;
-	isDone = 0;
-
-	while(!feof(fp) && !isDone){
-		TokenParser(symboldef,opcode_mnemonic,operand);
-		if(letThisLinePass == 0){
-			Decoder(symboldef,opcode_mnemonic,operand,opcode);
-			Translator(symboldef,opcode_mnemonic,operand,opcode);
-			Printer(symboldef,opcode_mnemonic,operand,opcode);
-		}
-		if(feof(fp)){
-			return 0;
-		}
-		//letThisLinePass=0;
-		statusBit = 0;
-	}
-
+	SinglePass(filename,symboldef,opcode_mnemonic,operand,opcode);
+	whichPass = 2;
+	SinglePass(filename,symboldef,opcode_mnemonic,operand,opcode);
+	
 	filename = NULL;
 	symboldef = NULL;
 	opcode_mnemonic = NULL;
@@ -180,6 +143,44 @@ int main(){
 	return 0;
 }
 
+void SinglePass(char* filename,char* symboldef, char* opcode_mnemonic, char* operand, unsigned int* opcode){
+
+	fp=fopen(filename,"r");
+
+	if(fp == NULL){
+		printf("해당 파일을 읽을 수 없습니다.\n");
+		return;
+	}
+
+	while(!feof(fp) && !isDone){
+		TokenParser(symboldef,opcode_mnemonic,operand);
+		if(letThisLinePass == 0){
+			Decoder(symboldef,opcode_mnemonic,operand,opcode);
+			Translator(symboldef,opcode_mnemonic,operand,opcode);
+		}
+		if(feof(fp)){
+			//return 0;
+		}
+		//letThisLinePass=0;
+		//Initalize control signals before next line
+		statusBit = 0;
+		whereIsOnOPTAB = 0;
+		whereIsOnASMTAB = 0;
+	}
+
+	if(whichPass == 2){
+		//PrintBuffer(1);		//Print Last Line
+		//
+	}
+
+	fclose(fp);
+	letThisLinePass=0;
+	isDone = 0;
+	whereIsOnOPTAB =0;
+	whereIsOnASMTAB =0;
+
+}
+
 //Parser
 int TokenParser(char* symboldef, char* opcode_mnemonic, char* operand){
 	//READ A LINE
@@ -188,10 +189,6 @@ int TokenParser(char* symboldef, char* opcode_mnemonic, char* operand){
 	int i = 0, temp = 0;
 
 	if(fgets(stream,BUFSIZE,fp) != NULL){
-		if(feof(fp)) {
-			letThisLinePass = 1;
-			return 0;
-		}
 		token_pointer = strtok(stream," \n\t");
 		while(token_pointer != NULL && i <= 2)
 		{
@@ -210,17 +207,16 @@ int TokenParser(char* symboldef, char* opcode_mnemonic, char* operand){
 		}
 	}
 	//printf("\n"); FOR DEBUG
-
 	switch(i)
 	{
 		case 1:
-			symboldef = NULL;
+			*symboldef='\0';
 			strcpy(opcode_mnemonic,token[0]);
-			operand = NULL;
+			*operand='\0';
 			break;
 		case 2:
 			//opcode_mnemonic / OPERAND
-			symboldef = NULL;
+			*symboldef='\0';
 			strcpy(opcode_mnemonic,token[0]);
 			strcpy(operand,token[1]);
 			//printf("%s %s\n",opcode_mnemonic,operand); //FOR DEBUG
@@ -239,8 +235,6 @@ int TokenParser(char* symboldef, char* opcode_mnemonic, char* operand){
 }
 
 int Decoder(char* symboldef, char* opcode_mnemonic, char* operand, unsigned int* opcode){
-	int whereIsOnOPTAB = 0;
-	int whereIsOnASMTAB = 0;
 	char mode = StartsWith(operand);
 	char* ptr = NULL;
 	//Assembler Directive/Operation Code구분(opcode_mnemonic 처리)
@@ -253,14 +247,14 @@ int Decoder(char* symboldef, char* opcode_mnemonic, char* operand, unsigned int*
 	//find OP_TAB
 	whereIsOnOPTAB = FindTAB(OPTAB,opcode_mnemonic);
 	if(whereIsOnOPTAB>=0){ //if found
-		*opcode = OPTAB[whereIsOnOPTAB].opcode;		//change mnemonic to opcode_mnemonic
+		*opcode = OPTAB[whereIsOnOPTAB].opcode;			//change mnemonic to opcode_mnemonic
 		//printf("%X\n",*opcode);						//FOR DEBUG
-		LOCCTR[0] = PC;//OPTAB[whereIsOnOPTAB].format;	//increase locctr by format of instruction
+		LOCCTR[0] = PC;									//increase locctr by format of instruction
 		PC += OPTAB[whereIsOnOPTAB].format;
 		if(statusBit & isExtended){
 			PC += 4-OPTAB[whereIsOnOPTAB].format;		//In the Case of Extended, the Opcode Format is 4.
 		}
-		printf("%04X %04X",LOCCTR[0],PC);				//FOR DEBUG : PRINT CURRENT LOCCTR AND PC
+		//printf("%04X %04X",LOCCTR[0],PC);				//FOR DEBUG : PRINT CURRENT LOCCTR AND PC
 	}
 	else{
 		//if assembler directive : START(0), RESW(1), RESB(2), BYTE(3), EQU(4), ORG(5)
@@ -270,13 +264,16 @@ int Decoder(char* symboldef, char* opcode_mnemonic, char* operand, unsigned int*
 	}
 
 	//ADD SYMBOL DEFINITION AND ADDRESS TO SYMTAB(symboldef 처리)
-	if(symboldef != NULL){
+	if(*symboldef != NULL){
 		ht_set(SYMTAB,symboldef, LOCCTR[0],LOCCTR[0]);
 	}
 
 	//symbol reference and identify addressing mode (operand 처리)
 	//identifying addressing mode
-	operand = strtok(operand,"#@");
+	ptr = strtok(operand,"#@");
+	if(ptr!=NULL){
+		strcpy(operand,ptr);
+	}
 	//operand = ptr;
 	if(mode == '@') {
 		statusBit |= isIndirect;
@@ -289,7 +286,7 @@ int Decoder(char* symboldef, char* opcode_mnemonic, char* operand, unsigned int*
 		strtok(operand,",");
 		statusBit |= isIndexed;
 		//printf("%s",operand); //FOR DEBUG
-	}	
+	}
 }
 
 // Translator
@@ -299,35 +296,38 @@ int Translator(char* symboldef, char* opcode_mnemonic, char *operand, unsigned i
 	int operandToNumber;
 	unsigned int operationCode;
 	char mode = StartsWith(operand);
-	char* headerbuffer = &outputHeaderBuffer;
+	//char* headerbuffer = &outputHeaderBuffer;
 	/* For the record, ASMTAB looks like this
 	{"START",0,0xF0}, {"END",1,0xF1}, {"RESW",2,0xF2}, {"RESB",3,0xF3}, 
 	{"BYTE",4,0xF4}, {"WORD",5,0xF5}, {"EQU",6,0xF6},  {"ORG",7,0xF7},	{"LTORG",8,0xF8},*/
-	if((*opcode) >= 0xF0){	//Assembler Directive
+	if(whereIsOnOPTAB < 0){	//Assembler Directive
 		switch(*opcode & 0xF)
 		{
 			case 0:
 				startAddress = (int)strtoul(operand,NULL,16);
 				PC = startAddress;
 				LOCCTR[0] = PC-3;
-				sprintf(headerbuffer,"H%-6s%06X",symboldef,startAddress);
+				if(whichPass==2){
+					printf("H%-6s%06X%06X\n",symboldef,startAddress,endAddress-startAddress);
+				}
 				break;
 			case 1:
 				isDone = 1;
 				endAddress = LOCCTR[0];
-				sprintf(headerbuffer+13,"%06X\n",endAddress);
-				printf("%s",headerbuffer);
+				PC = (int)strtoul(operand,NULL,16);
+				//sprintf(headerbuffer+13,"%06X\n",endAddress);
+				//printf("%s",headerbuffer);
 				break;
 			case 2:
 				operandToNumber = atoi(operand);
-				printf("%04X\n", LOCCTR[0]);
+				//printf("%04X\n", LOCCTR[0]);
 				//LOCCTR[0]+=3*operandToNumber;
 				PC+=3*operandToNumber;
 				LOCCTR[0] = PC;
 				break;
 			case 3:
 				operandToNumber = atoi(operand);
-				printf("%04X\n", LOCCTR[0]);
+				//printf("%04X\n", LOCCTR[0]);
 				//LOCCTR[0]+=1*operandToNumber;
 				PC+=1*operandToNumber;
 				LOCCTR[0] = PC;
@@ -335,20 +335,22 @@ int Translator(char* symboldef, char* opcode_mnemonic, char *operand, unsigned i
 			case 4:
 				//print the value of operand to buffer
 				//LOCCTR[0] = PC;
-				printf("%04X ", LOCCTR[0]);
+				//printf("%04X ", LOCCTR[0]);
 				operand=strtok(operand,"'CX");
 				if(mode == 'C'){//'Character'
 					while(*operand != '\0')
 					{
-						printf("%2X",*operand);
+						//printf("%2X",*operand);
+						PrintOpCode(*operand,1);
 						//LOCCTR[0]+=1;
 						PC+=1;
-						//LOCCTR[0] = PC;
+						LOCCTR[0] = PC;
 						operand++;
 					}
-					printf("\n");
+					//printf("\n");
 				} else if(mode == 'X'){//'Hex Value'
-					printf("%s\n",operand);
+					//printf("%s\n",operand);
+					PrintOpCode(*operand,1);
 					//LOCCTR[0]+=1;
 					PC+=1;
 					//LOCCTR[0] = PC;
@@ -374,7 +376,6 @@ int Translator(char* symboldef, char* opcode_mnemonic, char *operand, unsigned i
 				break;
 			case 9:
 				//Set Base to operand value
-				//mode = StartsWith(operand);
 				if(mode == '*'){ //current LOCCTR
 					BASE = PC;//LOCCTR[0];
 				} else if(mode >= '0' && mode <= '9'){ //#number
@@ -385,26 +386,36 @@ int Translator(char* symboldef, char* opcode_mnemonic, char *operand, unsigned i
 					} else if(searchResultSYMTAB == NULL || searchResultSYMTAB->value == 0){
 						ht_set(SYMTAB,operand,0,LOCCTR[0]);	//Setting a SYMBOL without address and add unresolved address
 					} else {
-						if(!(statusBit & isExtended)){	//if not extended, we need to calculate address relatively
-							int diff = 0;
-							diff = searchResultSYMTAB->value - PC; //First, calculate address relative to PC
-							if (diff >= -2047 && diff <= 2048){
-								BASE = diff;						//This is PC Relative
-							} else {
-								diff = searchResultSYMTAB->value - BASE;
-								if( diff >= 0 && diff <= 4095){
-									BASE = diff;					//This is Base Relative
-								} else{
-									printf("\nERROR: OVERFLOW, THE ADDRESS CANNOT BE CALCULATED RELATIVELY\n");
-									return 0;
-								}
-							}
+						if(!(statusBit & isExtended)){			//if not extended, we need to calculate address relatively
+							BASE = searchResultSYMTAB->value; //First, calculate address relative to PC
 						}
 					}
 				}
 				break;
 		}
-	}else{
+	} else if(OPTAB[whereIsOnOPTAB].format == 1){
+		operandToNumber = *opcode;
+		//printf("%02X\n", operandToNumber);
+		PrintOpCode(operandToNumber,2);
+	} else if(OPTAB[whereIsOnOPTAB].format == 2){
+		char* ptr;
+		int whereIsOnREGTAB1 = 0;
+		int whereIsOnREGTAB2 = 0;
+		ptr = strpbrk(operand,",");
+		if(ptr == NULL){//only one register
+			whereIsOnREGTAB1 = FindTAB(REGTAB,operand);	
+			operandToNumber = ((*opcode) << 8) | (REGTAB[whereIsOnREGTAB1].opcode <<4);
+			//printf("%04X\n", operandToNumber);
+			PrintOpCode(operandToNumber,2);
+		}else{
+			strtok(operand,",");
+			whereIsOnREGTAB1 = FindTAB(REGTAB,operand);
+			whereIsOnREGTAB2 = FindTAB(REGTAB,(ptr+1));	
+			operandToNumber = ((*opcode) << 8) | (REGTAB[whereIsOnREGTAB1].opcode <<4) | (REGTAB[whereIsOnREGTAB2].opcode);
+			//printf("%04X\n", operandToNumber);
+			PrintOpCode(operandToNumber,2);
+		}		
+	} else { //Operation
 		if(mode == '='){	//This is Literal
 			mode = StartsWith(strtok(operand,"='"));
 			operand++;									// Remove Delimiter
@@ -412,7 +423,19 @@ int Translator(char* symboldef, char* opcode_mnemonic, char *operand, unsigned i
 			ht_set(LITTAB,operand,0,LOCCTR[0]);			// Insert this to LITTAB
 		} else if(mode == '*'){
 			operandToNumber = ((*opcode) << 16) | LOCCTR[0]&0xFFFF;
-			printf(" %06X\n",operandToNumber);
+			printf("%06X\n",operandToNumber);
+		} else if(mode >= '0' && mode <= '9'){ //This is number
+			int disp = atoi(operand);
+			if(disp >= 4096){
+				operandToNumber = ((*opcode) << 24 | statusBit<<8 | (disp & 0x0FFFFF));
+				//printf("%08X\n", operandToNumber);
+				PrintOpCode(operandToNumber,4);
+			}
+			else{
+				operandToNumber = ((*opcode) << 16 | statusBit | (disp & 0x0FFF));
+				//printf("%06X\n", operandToNumber);
+				PrintOpCode(operandToNumber,3);
+			}
 		} else{
 			searchResultSYMTAB = ht_get(SYMTAB,operand);
 			if(operand == NULL){
@@ -422,10 +445,12 @@ int Translator(char* symboldef, char* opcode_mnemonic, char *operand, unsigned i
 				ht_set(SYMTAB,operand,0,LOCCTR[0]);	//Setting a SYMBOL without address and add unresolved address
 				if(!(statusBit & isExtended)){
 					operandToNumber = ((*opcode) << 16 | statusBit);
-					printf(" %06X\n", operandToNumber);
+					//printf("%06X\n", operandToNumber);
+					PrintOpCode(operandToNumber,3);
 				} else {
 					operandToNumber = (((*opcode) << 16 | statusBit) << 8);
-					printf(" %08X\n", operandToNumber);
+					//printf("%08X\n", operandToNumber);
+					PrintOpCode(operandToNumber,4);
 				}
 			} else{
 				//already defined and founded		
@@ -447,19 +472,72 @@ int Translator(char* symboldef, char* opcode_mnemonic, char *operand, unsigned i
 						}
 					}
 					operandToNumber = ((*opcode) << 16 | statusBit | (diff & 0x0FFF));
-					printf(" %06X\n", operandToNumber);
+					//printf("%06X\n", operandToNumber);
+					PrintOpCode(operandToNumber,3);
 				} else{
 					//Extended Situation
 					operandToNumber = ((*opcode) << 24 | statusBit<<8 | (searchResultSYMTAB->value & 0x0FFFFF));
-					printf(" %08X\n", operandToNumber);
+					//printf("%08X\n", operandToNumber);
+					PrintOpCode(operandToNumber,4);
 				}
 			}
 		}
 	}
 }
 
-int Printer(char* symboldef, char* opcode_mnemonic, char *operand, int* opcode){
+void PrintOpCode(unsigned int operandToNumber, unsigned int format){
+	if(whichPass == 2){
+		if(LOCCTR[0] != previousLOCCTR){	//Address got changed, new line
+			PrintBuffer(1);
+		}
+		if(ptrOutputBuffer == 0){	//If empty buffer, mark 'T' and start address
+			sprintf(outputBufferPointer,"T%06X00", LOCCTR[0]);
+			ptrOutputBuffer+=9;
+		}
+		if((ptrOutputBuffer+format) >= BUFSIZE - 2){	//Buffer is about to overflow
+			PrintBuffer(1);
+			sprintf(outputBufferPointer,"T%06X00", LOCCTR[0]);
+			ptrOutputBuffer+=9;
+		}
+		switch(format){	//Print machine code to buffer
+			case 1:
+				sprintf(outputBufferPointer+ptrOutputBuffer,"%02X",operandToNumber);
+				ptrOutputBuffer+=2;
+				break;
+			case 2:
+				sprintf(outputBufferPointer+ptrOutputBuffer,"%04X",operandToNumber);
+				ptrOutputBuffer+=4;
+				break;
+			case 3:
+				sprintf(outputBufferPointer+ptrOutputBuffer,"%06X",operandToNumber);
+				ptrOutputBuffer+=6;
+				break;
+			case 4:	
+				sprintf(outputBufferPointer+ptrOutputBuffer,"%08X",operandToNumber);
+				ptrOutputBuffer+=8;
+				break;
+			}
+			previousLOCCTR = LOCCTR[0]+format;
+		if(LOCCTR[0]+format == endAddress){
+			PrintBuffer(1);
+		}
+	} else {
+		return;
+	}
+}
 
+void PrintBuffer(unsigned int flush){
+	if(whichPass == 2){
+		if(flush){	//flush current buffer
+			char temp = outputBuffer[9];
+			sprintf(outputBufferPointer+7,"%02X",(ptrOutputBuffer-9)/2);	//Insert Length to outputBufferPointer 
+			outputBuffer[9] = temp;
+			printf("%s\n",outputBuffer);
+			outputBufferPointer[0] = '\0';
+			ptrOutputBuffer = 0;
+		}
+		
+	}
 }
 
 char StartsWith(char* string){ 
@@ -483,14 +561,14 @@ int FindTAB(SIC_OPTAB* table,char* opcode_mnemonic){
 	int index_start = 0, index_end=0;
 	int i = 0;
 	if(table == OPTAB){
-		index_start = 0;
 		index_end = NUM_OPCODES;
-	}else{
-		index_start = 0;
+	}else if(table == ASMTAB){
 		index_end = NUM_ASMDIRS;
+	}else{
+		index_end = NUM_REGS;
 	}
-	
-	for(i=index_start; i<=index_end; i++){
+
+	for(i=index_start; i<index_end; i++){
 		if(strcmp(opcode_mnemonic,table[i].name) == 0){
 			return i;
 		}
@@ -498,8 +576,4 @@ int FindTAB(SIC_OPTAB* table,char* opcode_mnemonic){
 	
 	return -1;
 
-}
-
-void insertToBuffer(char* string){
-	//	[BUFSIZE]
 }
