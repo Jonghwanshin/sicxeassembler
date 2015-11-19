@@ -5,19 +5,21 @@
 #include <limits.h>
 #include <string.h>
 
-typedef struct _unresolved_node {
+struct unresolved_node_s {
 	unsigned int address;
-	struct _unresolved_node *next;
-} unresolved_node;
+	struct unresolved_node_s *next;
+};
 
-struct entry_s {
+typedef struct unresolved_node_s unresolved_node;
+
+typedef struct entry_s {
 	char *key;
 	unsigned int value;
 	unresolved_node *unresolved;
 	struct entry_s *next;
-};
+} entry_t;
 
-typedef struct entry_s entry_t;
+//typedef  entry_s entry_t;
 
 struct hashtable_s {
 	int size;
@@ -32,6 +34,7 @@ entry_t *ht_newpair( char *key, unsigned int value );
 void ht_set( hashtable_t *hashtable, char *key, unsigned int value, unsigned int currentaddress );
 entry_t* ht_get( hashtable_t *hashtable, char *key );
 
-unresolved_node* NewUnresolvedNode(unsigned int address);
+unsigned int ShowFirstNode(unresolved_node* header);
+unresolved_node* NewUnresolvedNode(unresolved_node* header, unsigned int address);
 
 #endif

@@ -158,9 +158,32 @@ entry_t* ht_get( hashtable_t *hashtable, char *key ) {
 	
 }
 
-unresolved_node* NewUnresolvedNode(unsigned int address){
-	unresolved_node* node = (unresolved_node *)malloc(sizeof(unresolved_node));
-	node->address = address;
-	node->next = NULL;
-	return node;
+/* Create a new unresolvedtable. */
+
+unsigned int ShowFirstNode(unresolved_node* header){
+	if(header != NULL){
+		unresolved_node* temp = header;
+		unsigned int value = temp->address;
+		header = header->next;
+		//free(temp);
+		return value;
+	}
+}
+
+unresolved_node* NewUnresolvedNode(unresolved_node* header, unsigned int address){
+	unresolved_node* newnode = (unresolved_node *)malloc(sizeof(unresolved_node));
+	unresolved_node* search;
+	newnode->address = address;
+	newnode->next = NULL;
+	if(header == NULL){
+		header = newnode;
+		header->next = NULL;
+	}else{
+		search = header;
+		while(search->next != NULL){
+			search = search->next;
+		}
+		search->next = newnode;
+	}
+	return header;
 }

@@ -1,7 +1,8 @@
 #include<stdio.h>
 #include<malloc.h>
 #include<string.h>
-
+#include<limits.h>
+#include<stdlib.h>
 #include"hashtable.h"
 
 #define ULONG_MAX 4294967295
@@ -51,8 +52,18 @@ static SIC_OPTAB REGTAB  [] = {
 };
 #define NUM_REGS         (sizeof(REGTAB) / sizeof(SIC_OPTAB))
 
+//Register Definition
+int A = 0;
+int X = 0;
+int L = 0;
+int BASE = 0;
+int PC = 0;
+
 //LITTAB Definition
 hashtable_t* LITTAB;
+
+//Modification Record Table Definition
+unresolved_node* MDRTAB;
 
 //START(0), END(1), RESW(2), RESB(3), BYTE(4), WORD(5), EQU(6), ORG(7), LTORG(8)
 static SIC_OPTAB ASMTAB[] = {
@@ -64,13 +75,6 @@ static SIC_OPTAB ASMTAB[] = {
 //LOCCTR(GLOBAL, DEFAULT, CDATA, CBLKS
 unsigned int* presentLOCCTR = NULL;
 unsigned int LOCCTR[4] = {0,};
-
-//Register Definition
-int A = 0;
-int X = 0;
-int L = 0;
-int BASE = 0;
-int PC = 0;
 
 //CONTROL SIGNAL
 int letThisLinePass = 0;
@@ -103,7 +107,7 @@ int FindTAB(SIC_OPTAB* table,char* opcode_mnemonic);
 char StartsWith(char* string);
 void PrintOpCode(unsigned int operandToNumber, unsigned int format);
 void PrintBuffer(unsigned int flush);
-
+void PrintModificationRecord();
 int TokenParser(char* symboldef, char* opcode_mnemonic, char* operand);
 int Decoder(char* symboldef, char* opcode_mnemonic, char* operand, unsigned int* opcode);
 int Translator(char* symboldef, char* opcode_mnemonic, char* operand, unsigned int* opcode);
@@ -134,6 +138,9 @@ int main(){
 	operand = NULL;
 	opcode = NULL;
 
+	free(SYMTAB);
+	free(LITTAB);
+	free(MDRTAB);
 	free(filename);
 	free(symboldef);
 	free(opcode_mnemonic);
@@ -169,8 +176,7 @@ void SinglePass(char* filename,char* symboldef, char* opcode_mnemonic, char* ope
 	}
 
 	if(whichPass == 2){
-		//PrintBuffer(1);		//Print Last Line
-		//
+		PrintModificationRecord(); //Print modification record
 	}
 
 	fclose(fp);
@@ -181,7 +187,15 @@ void SinglePass(char* filename,char* symboldef, char* opcode_mnemonic, char* ope
 
 }
 
-//Parser
+void PrintModificationRecord(){
+	while(MDRTAB!=NULL){
+		printf("M%06X05\n",ShowFirstNode(MDRTAB));
+		MDRTAB = MDRTAB->next;
+	}
+	
+}
+
+//Parses each line
 int TokenParser(char* symboldef, char* opcode_mnemonic, char* operand){
 	//READ A LINE
 	char token[3][10] = {'\0',};
@@ -234,6 +248,7 @@ int TokenParser(char* symboldef, char* opcode_mnemonic, char* operand){
 	}
 }
 
+//Decodes each line
 int Decoder(char* symboldef, char* opcode_mnemonic, char* operand, unsigned int* opcode){
 	char mode = StartsWith(operand);
 	char* ptr = NULL;
@@ -289,7 +304,7 @@ int Decoder(char* symboldef, char* opcode_mnemonic, char* operand, unsigned int*
 	}
 }
 
-// Translator
+//Translates each line to machine code
 int Translator(char* symboldef, char* opcode_mnemonic, char *operand, unsigned int* opcode){
 	//Address Calculation
 	entry_t* searchResultSYMTAB;
@@ -307,59 +322,43 @@ int Translator(char* symboldef, char* opcode_mnemonic, char *operand, unsigned i
 				startAddress = (int)strtoul(operand,NULL,16);
 				PC = startAddress;
 				LOCCTR[0] = PC-3;
-				if(whichPass==2){
+				if(whichPass==2)
 					printf("H%-6s%06X%06X\n",symboldef,startAddress,endAddress-startAddress);
-				}
 				break;
 			case 1:
 				isDone = 1;
 				endAddress = LOCCTR[0];
 				PC = (int)strtoul(operand,NULL,16);
-				//sprintf(headerbuffer+13,"%06X\n",endAddress);
-				//printf("%s",headerbuffer);
 				break;
 			case 2:
 				operandToNumber = atoi(operand);
-				//printf("%04X\n", LOCCTR[0]);
-				//LOCCTR[0]+=3*operandToNumber;
+				//printf("%04X\n", LOCCTR[0]);		//FOR DEBUG
 				PC+=3*operandToNumber;
 				LOCCTR[0] = PC;
 				break;
 			case 3:
 				operandToNumber = atoi(operand);
-				//printf("%04X\n", LOCCTR[0]);
-				//LOCCTR[0]+=1*operandToNumber;
 				PC+=1*operandToNumber;
 				LOCCTR[0] = PC;
 				break;
 			case 4:
 				//print the value of operand to buffer
-				//LOCCTR[0] = PC;
-				//printf("%04X ", LOCCTR[0]);
 				operand=strtok(operand,"'CX");
 				if(mode == 'C'){//'Character'
 					while(*operand != '\0')
 					{
-						//printf("%2X",*operand);
 						PrintOpCode(*operand,1);
-						//LOCCTR[0]+=1;
 						PC+=1;
 						LOCCTR[0] = PC;
 						operand++;
 					}
-					//printf("\n");
 				} else if(mode == 'X'){//'Hex Value'
-					//printf("%s\n",operand);
-					PrintOpCode(*operand,1);
-					//LOCCTR[0]+=1;
+					PrintOpCode((int)strtoul(operand,NULL,16),1);
 					PC+=1;
-					//LOCCTR[0] = PC;
 				}
 				LOCCTR[0]=PC;
 				break;
 			case 5:
-				//print the value of operand to buffer
-				//LOCCTR[0]+=3;
 				PC+=3;
 				LOCCTR[0] = PC;
 				break;
@@ -368,16 +367,31 @@ int Translator(char* symboldef, char* opcode_mnemonic, char *operand, unsigned i
 				ht_set(SYMTAB,symboldef,atoi(operand),LOCCTR[0]);
 				break;
 			case 7:
-				//set location value to operand
-				//ht_set
+				//set location counter to operand
+				if(mode == '*'){ //current LOCCTR
+					LOCCTR[0] = PC;//LOCCTR[0];
+				} else if(mode >= '0' && mode <= '9'){ //#number
+					LOCCTR[0] = atoi(operand);
+				} else{ //symbol
+					searchResultSYMTAB = ht_get(SYMTAB,operand);
+					if(operand == NULL){
+					} else if(searchResultSYMTAB == NULL || searchResultSYMTAB->value == 0){
+						ht_set(SYMTAB,operand,0,LOCCTR[0]);	//Setting a SYMBOL without address and add unresolved address
+					} else {
+						if(!(statusBit & isExtended)){			//if not extended, we need to calculate address relatively
+							LOCCTR[0] = searchResultSYMTAB->value; //First, calculate address relative to PC
+						}
+					}
+				}
 				break;
 			case 8:
-				//print all the contents in the LITTAB which are not located somewhere.
+				//LTORG, print all the contents in the LITTAB which are not located somewhere.
+
 				break;
 			case 9:
 				//Set Base to operand value
 				if(mode == '*'){ //current LOCCTR
-					BASE = PC;//LOCCTR[0];
+					BASE = LOCCTR[0];//LOCCTR[0];
 				} else if(mode >= '0' && mode <= '9'){ //#number
 					BASE = atoi(operand);
 				} else{ //symbol
@@ -403,7 +417,8 @@ int Translator(char* symboldef, char* opcode_mnemonic, char *operand, unsigned i
 		int whereIsOnREGTAB2 = 0;
 		ptr = strpbrk(operand,",");
 		if(ptr == NULL){//only one register
-			whereIsOnREGTAB1 = FindTAB(REGTAB,operand);	
+			whereIsOnREGTAB1 = FindTAB(REGTAB,
+				operand);	
 			operandToNumber = ((*opcode) << 8) | (REGTAB[whereIsOnREGTAB1].opcode <<4);
 			//printf("%04X\n", operandToNumber);
 			PrintOpCode(operandToNumber,2);
@@ -415,12 +430,17 @@ int Translator(char* symboldef, char* opcode_mnemonic, char *operand, unsigned i
 			//printf("%04X\n", operandToNumber);
 			PrintOpCode(operandToNumber,2);
 		}		
-	} else { //Operation
+	} else { //Operation Format 3/4
 		if(mode == '='){	//This is Literal
+			entry_t* searchResultFromLITTAB = NULL;
 			mode = StartsWith(strtok(operand,"='"));
-			operand++;									// Remove Delimiter
-			ht_get(LITTAB,operand);						// Find this from LITTAB
-			ht_set(LITTAB,operand,0,LOCCTR[0]);			// Insert this to LITTAB
+			operand++;																		// Remove Delimiter
+			searchResultFromLITTAB = ht_get(LITTAB,operand);						// Find this from LITTAB
+			if(searchResultFromLITTAB != NULL){												// Founded
+				
+			}else{
+				ht_set(LITTAB,operand,0,LOCCTR[0]);											// Insert this to LITTAB
+			}
 		} else if(mode == '*'){
 			operandToNumber = ((*opcode) << 16) | LOCCTR[0]&0xFFFF;
 			printf("%06X\n",operandToNumber);
@@ -475,10 +495,11 @@ int Translator(char* symboldef, char* opcode_mnemonic, char *operand, unsigned i
 					//printf("%06X\n", operandToNumber);
 					PrintOpCode(operandToNumber,3);
 				} else{
-					//Extended Situation
+					//Extended
 					operandToNumber = ((*opcode) << 24 | statusBit<<8 | (searchResultSYMTAB->value & 0x0FFFFF));
-					//printf("%08X\n", operandToNumber);
 					PrintOpCode(operandToNumber,4);
+					if(whichPass == 2)
+						MDRTAB=NewUnresolvedNode(MDRTAB,LOCCTR[0]+1); //add this to modification record
 				}
 			}
 		}
