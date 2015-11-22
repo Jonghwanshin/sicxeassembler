@@ -2,6 +2,10 @@
 
 #include "hashtable.h"
 
+hashtable_t* SYMTAB;	//SYMTAB DEFINITION
+//hashtable_t* LITTAB;	//LITTAB Definition
+unresolved_node* MDRTAB;	//Modification Record Table Definition
+
 /* Create a new hashtable. */
 hashtable_t *ht_create( int size ) {
 

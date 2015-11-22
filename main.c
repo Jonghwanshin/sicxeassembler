@@ -1,9 +1,4 @@
-#include<stdio.h>
-#include<malloc.h>
-#include<string.h>
-#include<limits.h>
-#include<stdlib.h>
-#include"hashtable.h"
+#include "includes.h"
 
 #define ULONG_MAX 4294967295
 #define BUFSIZE 70
@@ -13,9 +8,6 @@ typedef struct{
 	int opcode;
 	char format;
 } SIC_OPTAB;
-
-//SYMTAB DEFINITION
-hashtable_t* SYMTAB;
 
 //OPTAB DEFINITION
 static SIC_OPTAB OPTAB[] = {
@@ -57,13 +49,7 @@ int A = 0;
 int X = 0;
 int L = 0;
 int BASE = 0;
-int PC = 0;
-
-//LITTAB Definition
-hashtable_t* LITTAB;
-
-//Modification Record Table Definition
-unresolved_node* MDRTAB;
+unsigned int PC = 0;
 
 //START(0), END(1), RESW(2), RESB(3), BYTE(4), WORD(5), EQU(6), ORG(7), LTORG(8)
 static SIC_OPTAB ASMTAB[] = {
@@ -120,10 +106,10 @@ int main(){
 	char* opcode_mnemonic = (char *)malloc(4*sizeof(char));
 	char* operand = (char *)malloc(10*sizeof(char));
 	unsigned int* opcode = (unsigned int *)malloc(sizeof(int));
-	outputBufferPointer = &outputBuffer;
+	outputBufferPointer = &outputBuffer[0];
 
 	SYMTAB = ht_create(100);
-	LITTAB = ht_create(100);
+
 	printf("_______________SIC/XE Assembler_______________\n");
 	printf("Assemble을 원하는 File의 이름을 입력해주세요.\n Filename >");
 	scanf("%s",filename);
@@ -146,7 +132,6 @@ int main(){
 	free(opcode_mnemonic);
 	free(operand);
 	free(opcode);
-	fclose(fp);
 	return 0;
 }
 
@@ -165,16 +150,15 @@ void SinglePass(char* filename,char* symboldef, char* opcode_mnemonic, char* ope
 			Decoder(symboldef,opcode_mnemonic,operand,opcode);
 			Translator(symboldef,opcode_mnemonic,operand,opcode);
 		}
-		if(feof(fp)){
-			//return 0;
-		}
-		//letThisLinePass=0;
+		
 		//Initalize control signals before next line
 		statusBit = 0;
 		whereIsOnOPTAB = 0;
 		whereIsOnASMTAB = 0;
 	}
-
+	if(whichPass == 1){
+		DeployLiteral(&PC);
+	}
 	if(whichPass == 2){
 		PrintModificationRecord(); //Print modification record
 	}
@@ -192,7 +176,6 @@ void PrintModificationRecord(){
 		printf("M%06X05\n",ShowFirstNode(MDRTAB));
 		MDRTAB = MDRTAB->next;
 	}
-	
 }
 
 //Parses each line
@@ -386,7 +369,7 @@ int Translator(char* symboldef, char* opcode_mnemonic, char *operand, unsigned i
 				break;
 			case 8:
 				//LTORG, print all the contents in the LITTAB which are not located somewhere.
-
+				DeployLiteral(&PC);
 				break;
 			case 9:
 				//Set Base to operand value
@@ -417,8 +400,7 @@ int Translator(char* symboldef, char* opcode_mnemonic, char *operand, unsigned i
 		int whereIsOnREGTAB2 = 0;
 		ptr = strpbrk(operand,",");
 		if(ptr == NULL){//only one register
-			whereIsOnREGTAB1 = FindTAB(REGTAB,
-				operand);	
+			whereIsOnREGTAB1 = FindTAB(REGTAB,operand);	
 			operandToNumber = ((*opcode) << 8) | (REGTAB[whereIsOnREGTAB1].opcode <<4);
 			//printf("%04X\n", operandToNumber);
 			PrintOpCode(operandToNumber,2);
@@ -432,15 +414,8 @@ int Translator(char* symboldef, char* opcode_mnemonic, char *operand, unsigned i
 		}		
 	} else { //Operation Format 3/4
 		if(mode == '='){	//This is Literal
-			entry_t* searchResultFromLITTAB = NULL;
-			mode = StartsWith(strtok(operand,"='"));
-			operand++;																		// Remove Delimiter
-			searchResultFromLITTAB = ht_get(LITTAB,operand);						// Find this from LITTAB
-			if(searchResultFromLITTAB != NULL){												// Founded
-				
-			}else{
-				ht_set(LITTAB,operand,0,LOCCTR[0]);											// Insert this to LITTAB
-			}
+			// LiteralOperation(operand);
+
 		} else if(mode == '*'){
 			operandToNumber = ((*opcode) << 16) | LOCCTR[0]&0xFFFF;
 			printf("%06X\n",operandToNumber);
