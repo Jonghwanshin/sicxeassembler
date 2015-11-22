@@ -14,6 +14,7 @@ typedef struct unresolved_node_s unresolved_node;
 typedef struct entry_s {
 	char *key;
 	unsigned int value;
+	unsigned int isRelative;	//relative를 표시하기 위함(expression)
 	unresolved_node *unresolved;
 	struct entry_s *next;
 } entry_t;
@@ -36,6 +37,7 @@ int ht_hash( hashtable_t *hashtable, char *key );
 entry_t *ht_newpair( char *key, unsigned int value );
 void ht_set( hashtable_t *hashtable, char *key, unsigned int value, unsigned int currentaddress );
 entry_t* ht_get( hashtable_t *hashtable, char *key );
+void ht_print(hashtable_t *hashtable, char* tablename);
 
 unsigned int ShowFirstNode(unresolved_node* header);
 unresolved_node* NewUnresolvedNode(unresolved_node* header, unsigned int address);

@@ -4,7 +4,6 @@
 #include<stdio.h>
 #include<malloc.h>
 #include<string.h>
-#include<limits.h>
 #include<stdlib.h>
 #include"hashtable.h"
 #include"littab.h"

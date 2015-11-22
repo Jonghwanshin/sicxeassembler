@@ -51,16 +51,20 @@ int L = 0;
 int BASE = 0;
 unsigned int PC = 0;
 
-//START(0), END(1), RESW(2), RESB(3), BYTE(4), WORD(5), EQU(6), ORG(7), LTORG(8)
+//START(0), END(1), RESW(2), RESB(3), BYTE(4), WORD(5), EQU(6), ORG(7), LTORG(8), BASE(9), USE(10), EXTDEF(11), EXTREF(12)
 static SIC_OPTAB ASMTAB[] = {
-	{"START",0xF0,0}, {"END",0xF1,1}, {"RESW",0xF2,2}, 
-	{"RESB", 0xF3,3}, {"BYTE",0xF4,4}, {"WORD",0xF5,5},
-	{"EQU",0xF6,6}, {"ORG",0xF7,7},	 {"LTORG",0xF8,8}, {"BASE",0xF9,9},};
+	{"START",0xF0,0},	{"END",0xF1,1},		{"RESW",0xF2,2}, 
+	{"RESB", 0xF3,3},	{"BYTE",0xF4,4},	{"WORD",0xF5,5},
+	{"EQU",0xF6,6},		{"ORG",0xF7,7},		{"LTORG",0xF8,8}, 
+	{"BASE",0xF9,9}, 	{"USE",0xFA,10},	{"EXTDEF",0xFB,11},	
+	{"EXTREF",0xFC,12},};
 #define NUM_ASMDIRS			(sizeof(ASMTAB)/sizeof(SIC_OPTAB))
 
 //LOCCTR(GLOBAL, DEFAULT, CDATA, CBLKS
 unsigned int* presentLOCCTR = NULL;
-unsigned int LOCCTR[4] = {0,};
+unsigned int LOCCTR[3] = {0,};
+unsigned int LOCCTR_start[3]={0,};
+//unsigned int LOCCTR_length[
 
 //CONTROL SIGNAL
 int letThisLinePass = 0;
@@ -94,11 +98,15 @@ char StartsWith(char* string);
 void PrintOpCode(unsigned int operandToNumber, unsigned int format);
 void PrintBuffer(unsigned int flush);
 void PrintModificationRecord();
+//void PrintSYMTAB();
+
 int TokenParser(char* symboldef, char* opcode_mnemonic, char* operand);
 int Decoder(char* symboldef, char* opcode_mnemonic, char* operand, unsigned int* opcode);
 int Translator(char* symboldef, char* opcode_mnemonic, char* operand, unsigned int* opcode);
 
 void SinglePass(char* filename,char* symboldef, char* opcode_mnemonic, char* operand, unsigned int* opcode);
+void OperationIsAssemblerDirective(char* symboldef, char* opcode_mnemonic, char *operand, unsigned int* opcode);
+void OperationIsMachineOperation(char* symboldef, char* opcode_mnemonic, char *operand, unsigned int* opcode);
 
 int main(){
 	char* filename = (char *)malloc(20*sizeof(char));
@@ -150,17 +158,17 @@ void SinglePass(char* filename,char* symboldef, char* opcode_mnemonic, char* ope
 			Decoder(symboldef,opcode_mnemonic,operand,opcode);
 			Translator(symboldef,opcode_mnemonic,operand,opcode);
 		}
-		
 		//Initalize control signals before next line
 		statusBit = 0;
-		whereIsOnOPTAB = 0;
-		whereIsOnASMTAB = 0;
+		whereIsOnOPTAB = -1;
+		whereIsOnASMTAB = -1;
 	}
 	if(whichPass == 1){
 		DeployLiteral(&PC);
 	}
 	if(whichPass == 2){
 		PrintModificationRecord(); //Print modification record
+		ht_print(SYMTAB,"SYMTAB");
 	}
 
 	fclose(fp);
@@ -249,6 +257,7 @@ int Decoder(char* symboldef, char* opcode_mnemonic, char* operand, unsigned int*
 		//printf("%X\n",*opcode);						//FOR DEBUG
 		LOCCTR[0] = PC;									//increase locctr by format of instruction
 		PC += OPTAB[whereIsOnOPTAB].format;
+		//presentLOCCTR +=  OPTAB[whereIsOnOPTAB].format
 		if(statusBit & isExtended){
 			PC += 4-OPTAB[whereIsOnOPTAB].format;		//In the Case of Extended, the Opcode Format is 4.
 		}
@@ -290,16 +299,62 @@ int Decoder(char* symboldef, char* opcode_mnemonic, char* operand, unsigned int*
 //Translates each line to machine code
 int Translator(char* symboldef, char* opcode_mnemonic, char *operand, unsigned int* opcode){
 	//Address Calculation
+	if(whereIsOnOPTAB < 0){	//Assembler Directive
+		OperationIsAssemblerDirective(symboldef,opcode_mnemonic,operand,opcode);
+	} else {
+		OperationIsMachineOperation(symboldef,opcode_mnemonic,operand,opcode);
+	}
+}
+
+void PrintOpCode(unsigned int operandToNumber, unsigned int format){
+	if(whichPass == 2){
+		if(LOCCTR[0] != previousLOCCTR){	//Address got changed, new line
+			PrintBuffer(1);
+		}
+		if(ptrOutputBuffer == 0){	//If empty buffer, mark 'T' and start address
+			sprintf(outputBufferPointer,"T%06X00", LOCCTR[0]);
+			ptrOutputBuffer+=9;
+		}
+		if((ptrOutputBuffer+format) >= BUFSIZE - 2){	//Buffer is about to overflow
+			PrintBuffer(1);
+			sprintf(outputBufferPointer,"T%06X00", LOCCTR[0]);
+			ptrOutputBuffer+=9;
+		}
+		switch(format){	//Print machine code to buffer
+			case 1:
+				sprintf(outputBufferPointer+ptrOutputBuffer,"%02X",operandToNumber);
+				ptrOutputBuffer+=2;
+				break;
+			case 2:
+				sprintf(outputBufferPointer+ptrOutputBuffer,"%04X",operandToNumber);
+				ptrOutputBuffer+=4;
+				break;
+			case 3:
+				sprintf(outputBufferPointer+ptrOutputBuffer,"%06X",operandToNumber);
+				ptrOutputBuffer+=6;
+				break;
+			case 4:	
+				sprintf(outputBufferPointer+ptrOutputBuffer,"%08X",operandToNumber);
+				ptrOutputBuffer+=8;
+				break;
+			}
+			previousLOCCTR = LOCCTR[0]+format;
+		if(LOCCTR[0]+format == endAddress){
+			PrintBuffer(1);
+		}
+	} else {
+		return;
+	}
+}
+
+void OperationIsAssemblerDirective(char* symboldef, char* opcode_mnemonic, char *operand, unsigned int* opcode){
+	/* For the record, ASMTAB looks like this
+	{"START",0,0xF0}, {"END",1,0xF1}, {"RESW",2,0xF2}, {"RESB",3,0xF3}, {"BYTE",4,0xF4}, {"WORD",5,0xF5}, {"EQU",6,0xF6},  {"ORG",7,0xF7},	{"LTORG",8,0xF8},*/
 	entry_t* searchResultSYMTAB;
-	int operandToNumber;
+	int operandToNumber = 0;
 	unsigned int operationCode;
 	char mode = StartsWith(operand);
-	//char* headerbuffer = &outputHeaderBuffer;
-	/* For the record, ASMTAB looks like this
-	{"START",0,0xF0}, {"END",1,0xF1}, {"RESW",2,0xF2}, {"RESB",3,0xF3}, 
-	{"BYTE",4,0xF4}, {"WORD",5,0xF5}, {"EQU",6,0xF6},  {"ORG",7,0xF7},	{"LTORG",8,0xF8},*/
-	if(whereIsOnOPTAB < 0){	//Assembler Directive
-		switch(*opcode & 0xF)
+	switch(*opcode & 0xF)
 		{
 			case 0:
 				startAddress = (int)strtoul(operand,NULL,16);
@@ -389,8 +444,16 @@ int Translator(char* symboldef, char* opcode_mnemonic, char *operand, unsigned i
 					}
 				}
 				break;
-		}
-	} else if(OPTAB[whereIsOnOPTAB].format == 1){
+	}
+}
+
+void OperationIsMachineOperation(char* symboldef, char* opcode_mnemonic, char *operand, unsigned int* opcode){
+	entry_t* searchResultSYMTAB;
+	int operandToNumber;
+	unsigned int operationCode;
+	char mode = StartsWith(operand);
+
+	if(OPTAB[whereIsOnOPTAB].format == 1){
 		operandToNumber = *opcode;
 		//printf("%02X\n", operandToNumber);
 		PrintOpCode(operandToNumber,2);
@@ -415,7 +478,7 @@ int Translator(char* symboldef, char* opcode_mnemonic, char *operand, unsigned i
 	} else { //Operation Format 3/4
 		if(mode == '='){	//This is Literal
 			// LiteralOperation(operand);
-
+			OperandIsLiteral(operand);
 		} else if(mode == '*'){
 			operandToNumber = ((*opcode) << 16) | LOCCTR[0]&0xFFFF;
 			printf("%06X\n",operandToNumber);
@@ -478,47 +541,6 @@ int Translator(char* symboldef, char* opcode_mnemonic, char *operand, unsigned i
 				}
 			}
 		}
-	}
-}
-
-void PrintOpCode(unsigned int operandToNumber, unsigned int format){
-	if(whichPass == 2){
-		if(LOCCTR[0] != previousLOCCTR){	//Address got changed, new line
-			PrintBuffer(1);
-		}
-		if(ptrOutputBuffer == 0){	//If empty buffer, mark 'T' and start address
-			sprintf(outputBufferPointer,"T%06X00", LOCCTR[0]);
-			ptrOutputBuffer+=9;
-		}
-		if((ptrOutputBuffer+format) >= BUFSIZE - 2){	//Buffer is about to overflow
-			PrintBuffer(1);
-			sprintf(outputBufferPointer,"T%06X00", LOCCTR[0]);
-			ptrOutputBuffer+=9;
-		}
-		switch(format){	//Print machine code to buffer
-			case 1:
-				sprintf(outputBufferPointer+ptrOutputBuffer,"%02X",operandToNumber);
-				ptrOutputBuffer+=2;
-				break;
-			case 2:
-				sprintf(outputBufferPointer+ptrOutputBuffer,"%04X",operandToNumber);
-				ptrOutputBuffer+=4;
-				break;
-			case 3:
-				sprintf(outputBufferPointer+ptrOutputBuffer,"%06X",operandToNumber);
-				ptrOutputBuffer+=6;
-				break;
-			case 4:	
-				sprintf(outputBufferPointer+ptrOutputBuffer,"%08X",operandToNumber);
-				ptrOutputBuffer+=8;
-				break;
-			}
-			previousLOCCTR = LOCCTR[0]+format;
-		if(LOCCTR[0]+format == endAddress){
-			PrintBuffer(1);
-		}
-	} else {
-		return;
 	}
 }
 

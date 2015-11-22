@@ -139,6 +139,27 @@ void ht_set( hashtable_t *hashtable, char *key, unsigned int value, unsigned int
 	}
 }
 
+void ht_print(hashtable_t *hashtable, char* tablename){
+	int n = 0;
+	entry_t* header = hashtable->table[0];
+	printf("---------TABLE: %s--------\n",tablename);
+	printf("NAME           VALUE       \n");
+	for(n = 0; n <hashtable->size ; n++){
+		header = hashtable->table[n];
+		if(header != NULL){
+			if(*(header->key) != NULL){
+				printf("%-10s     %06X\n",header->key,header->value);
+			}
+			header = header->next;
+			while(header != NULL){
+				printf("%-10s     %06X\n",header->key,header->value);
+				header = header->next;
+			}
+		}
+	}
+}
+
+
 /* Retrieve a key-value pair from a hash table. */
 entry_t* ht_get( hashtable_t *hashtable, char *key ) {
 	int bin = 0;
